@@ -1,7 +1,10 @@
 local string_format = string.format
 local ESX = exports['es_extended']:getSharedObject()
 local playerIdServer = {}
-local WebhookChannel = "https://discord.com/api/webhooks/" --ISI WEBHOOK DISINI
+
+local function GetPlayerFromId(src)
+    return ESX.GetPlayerFromId(src)
+end
 
 local function SecondsToClock(seconds)
     if seconds ~= nil then
@@ -18,38 +21,25 @@ local function SecondsToClock(seconds)
     end
 end
 
-local function SendToWebhook(tittle, desc)
+local function SendToWebhook(desc)
 	local embedsHook = {
 		{
-			title = tittle,
+			title = "TOP " ..Config.TopPlayingTime.. " PLAYING TIME",
 			description = desc,
 			fields = {
 				{name = "**STATUS EVENT**", value = 'SEDANG BERLANGSUNG', inline = true},
-                {name = "**THANKS TO**", value = 'TEAM', inline = true}
+                -- {name = "**THANKS TO**", value = 'TEAM', inline = true}
 			},
 			color = 65280
 		}
 	}
 
-    PerformHttpRequest(WebhookChannel, function(err, text, headers) end, 'POST', json.encode({username = '(PLAYING TIME)', embeds = embedsHook, avatar_url = ''}), { ['Content-Type'] = 'application/json' })
+    PerformHttpRequest(Config.Webhooks, function(err, text, headers) end, 'POST', json.encode({username = '(PLAYING TIME)', embeds = embedsHook, avatar_url = ''}), { ['Content-Type'] = 'application/json' })
 end
-
-MySQL.ready(function()
-    MySQL.query('SELECT `identifier`, `time`, `name` FROM `playtime` ORDER BY `time` DESC LIMIT 10', {}, function(response)
-        if response then
-            local sendTittleToWebhook = ''
-            for i = 1, #response do
-                local row = response[i]
-                sendTittleToWebhook = sendTittleToWebhook.. '```' ..i.. '.'..row.identifier.. '\n Nama IC: ' ..row.name.. ' \n'..SecondsToClock(row.time).. '```\n'
-            end
-            SendToWebhook('TOP PLAYING TIME', sendTittleToWebhook)
-        end
-    end)
-end)
 
 local function InitTimes(_source)
     local identifier = GetPlayerIdentifiers(_source)[1]
-    local Players = ESX.GetPlayerFromId(_source)
+    local Players = GetPlayerFromId(_source)
     local row = MySQL.single.await('SELECT `time` FROM `playtime` WHERE `identifier` = ? LIMIT 1', {
         identifier
     })
@@ -62,70 +52,55 @@ local function InitTimes(_source)
         playerIdServer[_source] = {
             time = 0
         }
-        MySQL.insert('INSERT INTO `playtime` (identifier, time, name) VALUES (?, ?, ?)', {
-            identifier, 0, Players.getName()
-        }, function(id)
-            -- print(id)
-        end)
+        MySQL.insert('INSERT INTO `playtime` (identifier, time, name) VALUES (?, ?, ?)', { identifier, 0, Players.getName() })
     end
 end
 
 local function UpdatePlayTime(_source)
     if playerIdServer[_source] then
-        local Players = ESX.GetPlayerFromId(_source)
+        local Players = GetPlayerFromId(_source)
         local identifier = GetPlayerIdentifiers(_source)[1]
         local timeSet = playerIdServer[_source].time
-        MySQL.update('UPDATE playtime SET time = ?, name = ? WHERE identifier = ?', {
-            timeSet, Players.getName(), identifier
-        }, function(affectedRows)
-            -- print('Update Time Playing : ', affectedRows)
-        end)
+        MySQL.update('UPDATE playtime SET time = ?, name = ? WHERE identifier = ?', { timeSet, Players.getName(), identifier })
     end
 end
 
 --################################################--
 -------------------START DEBUG----------------------
 --################################################--
---RegisterCommand('timeset', function(source)
---    InitTimes(source)
---end, false)
 
---RegisterCommand('timeupdate', function(source)
---	UpdatePlayTime(source)
---end, false)
+-- RegisterCommand('timeset', function(source)
+--    InitTimes(source)
+-- end, false)
+
+-- RegisterCommand('timeupdate', function(source)
+-- 	UpdatePlayTime(source)
+-- end, false)
+
 --################################################--
 -------------------END DEBUG----------------------
 --################################################--
 
+--RECOMENDED USE JIKA PLAYER 0
 lib.addCommand('sendplayingtime', {
     help = "Update Webhook PlayTime",
     params = nil,
     restricted = 'group.admin'
 }, function(source, args, raw)
-    MySQL.query('SELECT `identifier`, `time`, `name` FROM `playtime` ORDER BY `time` DESC LIMIT 10', {}, function(response)
+    MySQL.query("SELECT `identifier`, `time`, `name` FROM `playtime` ORDER BY `time` DESC LIMIT "..Config.TopPlayingTime, {}, function(response)
         if response then
-            local sendTittleToWebhook = ''
+            local sendTittleToWebhook = ""
             for i = 1, #response do
                 local row = response[i]
                 sendTittleToWebhook = sendTittleToWebhook.. '```' ..i.. '.'..row.identifier.. '\n Nama IC: ' ..row.name.. ' \n'..SecondsToClock(row.time).. '```\n'
             end
-            SendToWebhook('TOP PLAYING TIME', sendTittleToWebhook)
+            SendToWebhook(sendTittleToWebhook)
         end
     end)
 end)
 
-
-RegisterNetEvent('esx:playerLoaded', function(playerId)
-    -- print(playerId, 'set time loaded')
-    InitTimes(playerId)
-end)
-
-AddEventHandler('esx:playerDropped', function(playerid)
-    -- print('update player time dropped:  ', playerid)
-	UpdatePlayTime(playerid)
-    playerIdServer[playerid] = nil
-end)
-
+RegisterNetEvent('esx:playerLoaded', function(playerId) InitTimes(playerId) end)
+AddEventHandler('esx:playerDropped', function(playerid) UpdatePlayTime(playerid) playerIdServer[playerid] = nil end)
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName == cache.resource then
         for source in pairs(playerIdServer) do
@@ -145,6 +120,7 @@ local function PlayerNotInAFK(src)
     return true
 end
 
+--update time setiap 1 menit for performa
 local function PlayTimesPlus()
     for source in pairs(playerIdServer) do
         if playerIdServer[source] and PlayerNotInAFK(source) then
@@ -154,6 +130,17 @@ local function PlayTimesPlus()
     SetTimeout(60000, PlayTimesPlus)
 end
 
-CreateThread(function()
-    PlayTimesPlus()
+CreateThread(PlayTimesPlus)
+
+MySQL.ready(function()
+    MySQL.query("SELECT `identifier`, `time`, `name` FROM `playtime` ORDER BY `time` DESC LIMIT "..Config.TopPlayingTime, {}, function(response)
+        if response then
+            local sendTittleToWebhook = ""
+            for i = 1, #response do
+                local row = response[i]
+                sendTittleToWebhook = sendTittleToWebhook.. '```' ..i.. '.'..row.identifier.. '\n Nama IC: ' ..row.name.. ' \n '..SecondsToClock(row.time).. '```\n'
+            end
+            SendToWebhook(sendTittleToWebhook)
+        end
+    end)
 end)
